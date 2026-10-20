@@ -9,18 +9,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Unzip project
-        run: unzip -q FxAI-Project.zip -d proj
+        run: |
+          unzip -q -o FxAI-Project.zip -d proj
+      - name: Find project folder
+        id: p
+        run: |
+          D=$(dirname "$(find proj -name settings.gradle.kts | head -n 1)")
+          echo "dir=$D" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
+      - name: Accept SDK licenses
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Build debug APK
-        run: gradle -p proj assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle -p "${{ steps.p.outputs.dir }}" assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+      - name: Show error on summary
+        if: failure()
+        run: |
+          {
+            echo '### Build error'
+            echo '```'
+            if [ -f build.log ]; then
+              grep -E "e: |error:|What went wrong|Could not|FAILED" -A4 build.log | head -60 || true
+              tail -20 build.log
+            else
+              echo "build.log নেই, আগের ধাপে ফেইল করেছে"
+              ls -la
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: FxAI-APK
-          path: proj/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.p.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
